@@ -18,14 +18,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/Pass.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <set>
 using namespace llvm;
 
@@ -90,11 +91,13 @@ bool ConstantPropagation::runOnFunction(Function &F) {
 
         // Remove the dead instruction.
         WorkList.erase(I);
-        I->eraseFromParent();
+        if (isInstructionTriviallyDead(I, TLI)) {
+          I->eraseFromParent();
+          ++NumInstKilled;
+        }
 
         // We made a change to the function...
         Changed = true;
-        ++NumInstKilled;
       }
   }
   return Changed;

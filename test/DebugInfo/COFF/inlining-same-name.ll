@@ -14,15 +14,15 @@
 ; CHECK: CodeViewDebugInfo [
 ; CHECK:   Section: .debug$S
 ; CHECK:   Subsection [
-; CHECK:     ProcStart {
+; CHECK:     {{.*}}Proc{{.*}}Sym {
 ; CHECK:       DisplayName: main
 ; CHECK:     }
-; CHECK:     InlineSite {
+; CHECK:     InlineSiteSym {
 ; CHECK:       Inlinee: same_name (0x1002)
 ; CHECK:     }
 ; CHECK:     InlineSiteEnd {
 ; CHECK:     }
-; CHECK:     InlineSite {
+; CHECK:     InlineSiteSym {
 ; CHECK:       Inlinee: same_name (0x1002)
 ; CHECK:     }
 ; CHECK:     InlineSiteEnd {
@@ -33,18 +33,17 @@
 target datalayout = "e-m:w-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-pc-windows-msvc"
 
-define void @main(i32* %i.i) {
+define void @main(i32* %i.i) !dbg !16 {
   store volatile i32 3, i32* %i.i, !dbg !6
   store volatile i32 3, i32* %i.i, !dbg !19
   ret void
 }
 
-!llvm.module.flags = !{!0, !1, !2}
+!llvm.module.flags = !{!0, !1}
 !llvm.dbg.cu = !{!4}
 
 !0 = !{i32 2, !"CodeView", i32 1}
 !1 = !{i32 2, !"Debug Info Version", i32 3}
-!2 = !{i32 6, !"Linker Options", !{}}
 !4 = distinct !DICompileUnit(language: DW_LANG_D, file: !5, producer: "LDC (http://wiki.dlang.org/LDC)", isOptimized: false, runtimeVersion: 1, emissionKind: FullDebug)
 !5 = !DIFile(filename: "opover2.d", directory: "C:\5CLDC\5Cninja-ldc\5C..\5Cldc\5Ctests\5Cd2\5Cdmd-testsuite\5Crunnable")
 !6 = !DILocation(line: 302, column: 9, scope: !7, inlinedAt: !15)

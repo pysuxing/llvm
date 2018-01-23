@@ -7,7 +7,7 @@
 |*                                                                            *|
 |*===----------------------------------------------------------------------===*|
 |*                                                                            *|
-|* This file defines types used by the the C interface to LLVM.               *|
+|* This file defines types used by the C interface to LLVM.                   *|
 |*                                                                            *|
 \*===----------------------------------------------------------------------===*/
 
@@ -83,11 +83,25 @@ typedef struct LLVMOpaqueValue *LLVMValueRef;
 typedef struct LLVMOpaqueBasicBlock *LLVMBasicBlockRef;
 
 /**
+ * Represents an LLVM Metadata.
+ *
+ * This models llvm::Metadata.
+ */
+typedef struct LLVMOpaqueMetadata *LLVMMetadataRef;
+
+/**
  * Represents an LLVM basic block builder.
  *
  * This models llvm::IRBuilder.
  */
 typedef struct LLVMOpaqueBuilder *LLVMBuilderRef;
+
+/**
+ * Represents an LLVM debug info builder.
+ *
+ * This models llvm::DIBuilder.
+ */
+typedef struct LLVMOpaqueDIBuilder *LLVMDIBuilderRef;
 
 /**
  * Interface used to provide a module to JIT or interpreter.

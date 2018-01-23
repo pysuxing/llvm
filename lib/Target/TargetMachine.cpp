@@ -13,7 +13,8 @@
 
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/TargetLoweringObjectFile.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalValue.h"
@@ -26,9 +27,6 @@
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include "llvm/MC/SectionKind.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
 
 //---------------------------------------------------------------------------
@@ -40,7 +38,8 @@ TargetMachine::TargetMachine(const Target &T, StringRef DataLayoutString,
                              const TargetOptions &Options)
     : TheTarget(T), DL(DataLayoutString), TargetTriple(TT), TargetCPU(CPU),
       TargetFS(FS), AsmInfo(nullptr), MRI(nullptr), MII(nullptr), STI(nullptr),
-      RequireStructuredCFG(false), Options(Options) {}
+      RequireStructuredCFG(false), DefaultOptions(Options), Options(Options) {
+}
 
 TargetMachine::~TargetMachine() {
   delete AsmInfo;
@@ -56,20 +55,33 @@ bool TargetMachine::isPositionIndependent() const {
 /// \brief Reset the target options based on the function's attributes.
 // FIXME: This function needs to go away for a number of reasons:
 // a) global state on the TargetMachine is terrible in general,
-// b) there's no default state here to keep,
-// c) these target options should be passed only on the function
+// b) these target options should be passed only on the function
 //    and not on the TargetMachine (via TargetOptions) at all.
 void TargetMachine::resetTargetOptions(const Function &F) const {
 #define RESET_OPTION(X, Y)                                                     \
   do {                                                                         \
     if (F.hasFnAttribute(Y))                                                   \
       Options.X = (F.getFnAttribute(Y).getValueAsString() == "true");          \
+    else                                                                       \
+      Options.X = DefaultOptions.X;                                            \
   } while (0)
 
-  RESET_OPTION(LessPreciseFPMADOption, "less-precise-fpmad");
   RESET_OPTION(UnsafeFPMath, "unsafe-fp-math");
   RESET_OPTION(NoInfsFPMath, "no-infs-fp-math");
   RESET_OPTION(NoNaNsFPMath, "no-nans-fp-math");
+  RESET_OPTION(NoSignedZerosFPMath, "no-signed-zeros-fp-math");
+  RESET_OPTION(NoTrappingFPMath, "no-trapping-math");
+
+  StringRef Denormal =
+    F.getFnAttribute("denormal-fp-math").getValueAsString();
+  if (Denormal == "ieee")
+    Options.FPDenormalMode = FPDenormal::IEEE;
+  else if (Denormal == "preserve-sign")
+    Options.FPDenormalMode = FPDenormal::PreserveSign;
+  else if (Denormal == "positive-zero")
+    Options.FPDenormalMode = FPDenormal::PositiveZero;
+  else
+    Options.FPDenormalMode = DefaultOptions.FPDenormalMode;
 }
 
 /// Returns the code generation relocation model. The choices are static, PIC,
@@ -98,11 +110,19 @@ static TLSModel::Model getSelectedTLSModel(const GlobalValue *GV) {
   llvm_unreachable("invalid TLS model");
 }
 
-// FIXME: make this a proper option
-static bool CanUseCopyRelocWithPIE = false;
-
 bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
                                          const GlobalValue *GV) const {
+  // If the IR producer requested that this GV be treated as dso local, obey.
+  if (GV && GV->isDSOLocal())
+    return true;
+
+  // According to the llvm language reference, we should be able to just return
+  // false in here if we have a GV, as we know it is dso_preemptable.
+  // At this point in time, the various IR producers have not been transitioned
+  // to always produce a dso_local when it is possible to do so. As a result we
+  // still have some pre-dso_local logic in here to improve the quality of the
+  // generated code:
+
   Reloc::Model RM = getRelocationModel();
   const Triple &TT = getTargetTriple();
 
@@ -110,11 +130,21 @@ bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
   if (GV && GV->hasDLLImportStorageClass())
     return false;
 
-  // Every other GV is local on COFF
-  if (TT.isOSBinFormatCOFF())
+  // Every other GV is local on COFF.
+  // Make an exception for windows OS in the triple: Some firmwares builds use
+  // *-win32-macho triples. This (accidentally?) produced windows relocations
+  // without GOT tables in older clang versions; Keep this behaviour.
+  if (TT.isOSBinFormatCOFF() || (TT.isOSWindows() && TT.isOSBinFormatMachO()))
     return true;
 
-  if (GV && (GV->hasLocalLinkage() || !GV->hasDefaultVisibility()))
+  // Most PIC code sequences that assume that a symbol is local cannot
+  // produce a 0 if it turns out the symbol is undefined. While this
+  // is ABI and relocation depended, it seems worth it to handle it
+  // here.
+  if (GV && isPositionIndependent() && GV->hasExternalWeakLinkage())
+    return false;
+
+  if (GV && !GV->hasDefaultVisibility())
     return true;
 
   if (TT.isOSBinFormatMachO()) {
@@ -133,9 +163,21 @@ bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
     if (GV && !GV->isDeclarationForLinker())
       return true;
 
+    // A symbol marked nonlazybind should not be accessed with a plt. If the
+    // symbol turns out to be external, the linker will convert a direct
+    // access to an access via the plt, so don't assume it is local.
+    const Function *F = dyn_cast_or_null<Function>(GV);
+    if (F && F->hasFnAttribute(Attribute::NonLazyBind))
+      return false;
+
     bool IsTLS = GV && GV->isThreadLocal();
-    // Check if we can use copy relocations.
-    if (!IsTLS && (RM == Reloc::Static || CanUseCopyRelocWithPIE))
+    bool IsAccessViaCopyRelocs =
+        Options.MCOptions.MCPIECopyRelocations && GV && isa<GlobalVariable>(GV);
+    Triple::ArchType Arch = TT.getArch();
+    bool IsPPC =
+        Arch == Triple::ppc || Arch == Triple::ppc64 || Arch == Triple::ppc64le;
+    // Check if we can use copy relocations. PowerPC has no copy relocations.
+    if (!IsTLS && !IsPPC && (RM == Reloc::Static || IsAccessViaCopyRelocs))
       return true;
   }
 
@@ -175,10 +217,8 @@ CodeGenOpt::Level TargetMachine::getOptLevel() const { return OptLevel; }
 
 void TargetMachine::setOptLevel(CodeGenOpt::Level Level) { OptLevel = Level; }
 
-TargetIRAnalysis TargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(F.getParent()->getDataLayout());
-  });
+TargetTransformInfo TargetMachine::getTargetTransformInfo(const Function &F) {
+  return TargetTransformInfo(F.getParent()->getDataLayout());
 }
 
 void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,
@@ -191,12 +231,19 @@ void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,
     return;
   }
   const TargetLoweringObjectFile *TLOF = getObjFileLowering();
-  TLOF->getNameWithPrefix(Name, GV, Mang, *this);
+  TLOF->getNameWithPrefix(Name, GV, *this);
 }
 
-MCSymbol *TargetMachine::getSymbol(const GlobalValue *GV, Mangler &Mang) const {
-  SmallString<128> NameStr;
-  getNameWithPrefix(NameStr, GV, Mang);
+MCSymbol *TargetMachine::getSymbol(const GlobalValue *GV) const {
   const TargetLoweringObjectFile *TLOF = getObjFileLowering();
+  SmallString<128> NameStr;
+  getNameWithPrefix(NameStr, GV, TLOF->getMangler());
   return TLOF->getContext().getOrCreateSymbol(NameStr);
+}
+
+TargetIRAnalysis TargetMachine::getTargetIRAnalysis() {
+  // Since Analysis can't depend on Target, use a std::function to invert the
+  // dependency.
+  return TargetIRAnalysis(
+      [this](const Function &F) { return this->getTargetTransformInfo(F); });
 }

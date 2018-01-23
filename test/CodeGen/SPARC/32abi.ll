@@ -25,17 +25,17 @@ define void @intarg(i8  %a0,   ; %i0
                     i32 %a5,   ; %i5
                     i32 signext %a6,   ; [%fp+92]
                     i8* %a7) { ; [%fp+96]
-  store i8 %a0, i8* %a4
-  store i8 %a1, i8* %a4
+  store volatile i8 %a0, i8* %a4
+  store volatile i8 %a1, i8* %a4
   %p16 = bitcast i8* %a4 to i16*
-  store i16 %a2, i16* %p16
+  store volatile i16 %a2, i16* %p16
   %p32 = bitcast i8* %a4 to i32*
-  store i32 %a3, i32* %p32
+  store volatile i32 %a3, i32* %p32
   %pp = bitcast i8* %a4 to i8**
-  store i8* %a4, i8** %pp
-  store i32 %a5, i32* %p32
-  store i32 %a6, i32* %p32
-  store i8* %a7, i8** %pp
+  store volatile i8* %a4, i8** %pp
+  store volatile i32 %a5, i32* %p32
+  store volatile i32 %a6, i32* %p32
+  store volatile i8* %a7, i8** %pp
   ret void
 }
 
@@ -60,9 +60,11 @@ define void @call_intarg(i32 %i0, i8* %i1) {
 ; HARD: mov %i5, %g2
 ; HARD-NEXT: ld [%fp+92], %g3
 ; HARD-NEXT: mov %i4, %i5
+; HARD-NEXT: ! kill
 ; HARD-NEXT: std %g2, [%fp+-24]
 ; HARD-NEXT: mov %i3, %i4
 ; HARD-NEXT: std %i4, [%fp+-16]
+; HARD-NEXT: ! kill
 ; HARD-NEXT: std %i0, [%fp+-8]
 ; HARD-NEXT: st %i2, [%fp+-28]
 ; HARD-NEXT: ld [%fp+104], %f0

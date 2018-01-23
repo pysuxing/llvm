@@ -27,6 +27,8 @@ struct R600RegisterInfo final : public AMDGPURegisterInfo {
   R600RegisterInfo();
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
+  const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
+  unsigned getFrameRegister(const MachineFunction &MF) const override;
 
   /// \brief get the HW encoding for a register's channel.
   unsigned getHWRegChan(unsigned reg) const;
@@ -40,8 +42,13 @@ struct R600RegisterInfo final : public AMDGPURegisterInfo {
   const RegClassWeight &
     getRegClassWeight(const TargetRegisterClass *RC) const override;
 
-  // \returns true if \p Reg can be defined in one ALU caluse and used in another.
+  // \returns true if \p Reg can be defined in one ALU clause and used in
+  // another.
   bool isPhysRegLiveAcrossClauses(unsigned Reg) const;
+
+  void eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
+                           unsigned FIOperandNum,
+                           RegScavenger *RS = nullptr) const override;
 };
 
 } // End namespace llvm

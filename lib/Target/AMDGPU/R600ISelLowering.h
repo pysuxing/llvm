@@ -44,6 +44,9 @@ public:
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &,
                          EVT VT) const override;
 
+  bool canMergeStoresTo(unsigned AS, EVT MemVT,
+                        const SelectionDAG &DAG) const override;
+
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
                                       unsigned Align,
                                       bool *IsFast) const override;
@@ -72,7 +75,8 @@ private:
 
   SDValue lowerPrivateTruncStore(StoreSDNode *Store, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFPTOUINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerFP_TO_UINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerFP_TO_SINT(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue lowerPrivateExtLoad(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;

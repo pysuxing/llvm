@@ -23,6 +23,8 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
@@ -30,8 +32,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 
@@ -60,10 +60,11 @@ MipsSERegisterInfo::intRegClass(unsigned Size) const {
   return &Mips::GPR64RegClass;
 }
 
-/// Get the size of the offset supported by the given load/store.
+/// Get the size of the offset supported by the given load/store/inline asm.
 /// The result includes the effects of any scale factors applied to the
 /// instruction immediate.
-static inline unsigned getLoadStoreOffsetSizeInBits(const unsigned Opcode) {
+static inline unsigned getLoadStoreOffsetSizeInBits(const unsigned Opcode,
+                                                    MachineOperand MO) {
   switch (Opcode) {
   case Mips::LD_B:
   case Mips::ST_B:
@@ -77,6 +78,47 @@ static inline unsigned getLoadStoreOffsetSizeInBits(const unsigned Opcode) {
   case Mips::LD_D:
   case Mips::ST_D:
     return 10 + 3 /* scale factor */;
+  case Mips::LL:
+  case Mips::LL64:
+  case Mips::LLD:
+  case Mips::LLE:
+  case Mips::SC:
+  case Mips::SC64:
+  case Mips::SCD:
+  case Mips::SCE:
+    return 16;
+  case Mips::LLE_MM:
+  case Mips::LL_MM:
+  case Mips::SCE_MM:
+  case Mips::SC_MM:
+    return 12;
+  case Mips::LL64_R6:
+  case Mips::LL_R6:
+  case Mips::LLD_R6:
+  case Mips::SC64_R6:
+  case Mips::SCD_R6:
+  case Mips::SC_R6:
+    return 9;
+  case Mips::INLINEASM: {
+    unsigned ConstraintID = InlineAsm::getMemoryConstraintID(MO.getImm());
+    switch (ConstraintID) {
+    case InlineAsm::Constraint_ZC: {
+      const MipsSubtarget &Subtarget = MO.getParent()
+                                           ->getParent()
+                                           ->getParent()
+                                           ->getSubtarget<MipsSubtarget>();
+      if (Subtarget.inMicroMipsMode())
+        return 12;
+
+      if (Subtarget.hasMips32r6())
+        return 9;
+
+      return 16;
+    }
+    default:
+      return 16;
+    }
+  }
   default:
     return 16;
   }
@@ -105,7 +147,7 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
                                      int64_t SPOffset) const {
   MachineInstr &MI = *II;
   MachineFunction &MF = *MI.getParent()->getParent();
-  MachineFrameInfo *MFI = MF.getFrameInfo();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
 
   MipsABIInfo ABI =
@@ -113,7 +155,7 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
   const MipsRegisterInfo *RegInfo =
     static_cast<const MipsRegisterInfo *>(MF.getSubtarget().getRegisterInfo());
 
-  const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
+  const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
   int MinCSFI = 0;
   int MaxCSFI = -1;
 
@@ -138,9 +180,9 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
       IsISRRegFI)
     FrameReg = ABI.GetStackPtr();
   else if (RegInfo->needsStackRealignment(MF)) {
-    if (MFI->hasVarSizedObjects() && !MFI->isFixedObjectIndex(FrameIndex))
+    if (MFI.hasVarSizedObjects() && !MFI.isFixedObjectIndex(FrameIndex))
       FrameReg = ABI.GetBasePtr();
-    else if (MFI->isFixedObjectIndex(FrameIndex))
+    else if (MFI.isFixedObjectIndex(FrameIndex))
       FrameReg = getFrameRegister(MF);
     else
       FrameReg = ABI.GetStackPtr();
@@ -166,7 +208,8 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
     // Make sure Offset fits within the field available.
     // For MSA instructions, this is a 10-bit signed immediate (scaled by
     // element size), otherwise it is a 16-bit signed immediate.
-    unsigned OffsetBitSize = getLoadStoreOffsetSizeInBits(MI.getOpcode());
+    unsigned OffsetBitSize =
+        getLoadStoreOffsetSizeInBits(MI.getOpcode(), MI.getOperand(OpNo - 1));
     unsigned OffsetAlign = getLoadStoreOffsetAlign(MI.getOpcode());
 
     if (OffsetBitSize < 16 && isInt<16>(Offset) &&

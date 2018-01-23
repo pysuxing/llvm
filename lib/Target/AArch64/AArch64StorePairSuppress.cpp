@@ -16,14 +16,16 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineTraceMetrics.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "aarch64-stp-suppress"
+
+#define STPSUPPRESS_PASS_NAME "AArch64 Store Pair Suppression"
 
 namespace {
 class AArch64StorePairSuppress : public MachineFunctionPass {
@@ -36,11 +38,11 @@ class AArch64StorePairSuppress : public MachineFunctionPass {
 
 public:
   static char ID;
-  AArch64StorePairSuppress() : MachineFunctionPass(ID) {}
-
-  const char *getPassName() const override {
-    return "AArch64 Store Pair Suppression";
+  AArch64StorePairSuppress() : MachineFunctionPass(ID) {
+    initializeAArch64StorePairSuppressPass(*PassRegistry::getPassRegistry());
   }
+
+  StringRef getPassName() const override { return STPSUPPRESS_PASS_NAME; }
 
   bool runOnMachineFunction(MachineFunction &F) override;
 
@@ -58,6 +60,9 @@ private:
 };
 char AArch64StorePairSuppress::ID = 0;
 } // anonymous
+
+INITIALIZE_PASS(AArch64StorePairSuppress, "aarch64-stp-suppress",
+                STPSUPPRESS_PASS_NAME, false, false)
 
 FunctionPass *llvm::createAArch64StorePairSuppressPass() {
   return new AArch64StorePairSuppress();
@@ -115,7 +120,7 @@ bool AArch64StorePairSuppress::isNarrowFPStore(const MachineInstr &MI) {
 }
 
 bool AArch64StorePairSuppress::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   const TargetSubtargetInfo &ST = MF.getSubtarget();

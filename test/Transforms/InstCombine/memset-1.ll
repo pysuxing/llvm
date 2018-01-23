@@ -26,6 +26,15 @@ define i8* @pr25892_lite(i32 %size) #0 {
 ; CHECK-NEXT:  ret i8* %calloc
 }
 
+; This should not create a calloc and not crash the compiler.
+; CHECK-LABEL: @notmalloc_memset
+; CHECK-NOT: @calloc
+define i8* @notmalloc_memset(i32 %size, i8*(i32)* %notmalloc) {
+  %call1 = call i8* %notmalloc(i32 %size) #1
+  %call2 = call i8* @memset(i8* %call1, i32 0, i32 %size) #1
+  ret i8* %call2
+}
+
 ; FIXME: memset(malloc(x), 0, x) -> calloc(1, x)
 ; This doesn't fire currently because the malloc has more than one use.
 
@@ -49,7 +58,7 @@ cleanup:
 ; CHECK-NEXT:    br i1 %cmp, label %cleanup, label %if.end
 ; CHECK:       if.end: 
 ; CHECK-NEXT:    %bc = bitcast i8* %call to float*
-; CHECK-NEXT:    call void @llvm.memset.p0i8.i32(i8* nonnull %call, i8 0, i32 %size, i32 1, i1 false)
+; CHECK-NEXT:    call void @llvm.memset.p0i8.i32(i8* nonnull align 1 %call, i8 0, i32 %size, i1 false)
 ; CHECK-NEXT:    br label %cleanup
 ; CHECK:       cleanup:
 ; CHECK-NEXT:    %retval.0 = phi float* [ %bc, %if.end ], [ null, %entry ]

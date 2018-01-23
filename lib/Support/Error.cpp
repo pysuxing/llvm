@@ -11,7 +11,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
-
+#include <system_error>
 
 using namespace llvm;
 
@@ -27,7 +27,7 @@ namespace {
   // deal with the Error value directly, rather than converting to error_code.
   class ErrorErrorCategory : public std::error_category {
   public:
-    const char *name() const LLVM_NOEXCEPT override { return "Error"; }
+    const char *name() const noexcept override { return "Error"; }
 
     std::string message(int condition) const override {
       switch (static_cast<ErrorErrorCode>(condition)) {
@@ -64,6 +64,7 @@ void logAllUnhandledErrors(Error E, raw_ostream &OS, Twine ErrorBanner) {
   });
 }
 
+
 std::error_code ErrorList::convertToErrorCode() const {
   return std::error_code(static_cast<int>(ErrorErrorCode::MultipleErrors),
                          *ErrorErrorCat);
@@ -90,6 +91,18 @@ std::error_code errorToErrorCode(Error Err) {
   return EC;
 }
 
+#if LLVM_ENABLE_ABI_BREAKING_CHECKS
+void Error::fatalUncheckedError() const {
+  dbgs() << "Program aborted due to an unhandled Error:\n";
+  if (getPtr())
+    getPtr()->log(dbgs());
+  else
+    dbgs() << "Error value was Success. (Note: Success values must still be "
+              "checked prior to being destroyed).\n";
+  abort();
+}
+#endif
+
 StringError::StringError(const Twine &S, std::error_code EC)
     : Msg(S.str()), EC(EC) {}
 
@@ -99,4 +112,29 @@ std::error_code StringError::convertToErrorCode() const {
   return EC;
 }
 
+void report_fatal_error(Error Err, bool GenCrashDiag) {
+  assert(Err && "report_fatal_error called with success value");
+  std::string ErrMsg;
+  {
+    raw_string_ostream ErrStream(ErrMsg);
+    logAllUnhandledErrors(std::move(Err), ErrStream, "");
+  }
+  report_fatal_error(ErrMsg);
 }
+
+}
+
+#ifndef _MSC_VER
+namespace llvm {
+
+// One of these two variables will be referenced by a symbol defined in
+// llvm-config.h. We provide a link-time (or load time for DSO) failure when
+// there is a mismatch in the build configuration of the API client and LLVM.
+#if LLVM_ENABLE_ABI_BREAKING_CHECKS
+int EnableABIBreakingChecks;
+#else
+int DisableABIBreakingChecks;
+#endif
+
+} // end namespace llvm
+#endif

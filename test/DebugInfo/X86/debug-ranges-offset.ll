@@ -31,11 +31,11 @@ entry:
   %call = call i8* @_Znwm(i64 4) #4, !dbg !19
   %_msret = load i64, i64* getelementptr inbounds ([8 x i64], [8 x i64]* @__msan_retval_tls, i64 0, i64 0), align 8, !dbg !19
   %3 = bitcast i8* %call to i32*, !dbg !19
-  tail call void @llvm.dbg.value(metadata i32* %3, i64 0, metadata !9, metadata !DIExpression()), !dbg !19
+  tail call void @llvm.dbg.value(metadata i32* %3, metadata !9, metadata !DIExpression()), !dbg !19
   %4 = inttoptr i64 %1 to i64*, !dbg !19
   store i64 %_msret, i64* %4, align 8, !dbg !19
   store volatile i32* %3, i32** %p, align 8, !dbg !19
-  tail call void @llvm.dbg.value(metadata i32** %p, i64 0, metadata !9, metadata !DIExpression()), !dbg !19
+  tail call void @llvm.dbg.value(metadata i32** %p, metadata !9, metadata !DIExpression()), !dbg !19
   %p.0.p.0. = load volatile i32*, i32** %p, align 8, !dbg !20
   %_msld = load i64, i64* %4, align 8, !dbg !20
   %_mscmp = icmp eq i64 %_msld, 0, !dbg !20
@@ -96,11 +96,11 @@ entry:
   %call.i = call i8* @_Znwm(i64 4) #4, !dbg !30
   %_msret = load i64, i64* getelementptr inbounds ([8 x i64], [8 x i64]* @__msan_retval_tls, i64 0, i64 0), align 8, !dbg !30
   %3 = bitcast i8* %call.i to i32*, !dbg !30
-  tail call void @llvm.dbg.value(metadata i32* %3, i64 0, metadata !32, metadata !DIExpression()), !dbg !30
+  tail call void @llvm.dbg.value(metadata i32* %3, metadata !32, metadata !DIExpression()), !dbg !30
   %4 = inttoptr i64 %1 to i64*, !dbg !30
   store i64 %_msret, i64* %4, align 8, !dbg !30
   store volatile i32* %3, i32** %p.i, align 8, !dbg !30
-  tail call void @llvm.dbg.value(metadata i32** %p.i, i64 0, metadata !32, metadata !DIExpression()), !dbg !30
+  tail call void @llvm.dbg.value(metadata i32** %p.i, metadata !32, metadata !DIExpression()), !dbg !30
   %p.i.0.p.0.p.0..i = load volatile i32*, i32** %p.i, align 8, !dbg !33
   %_msld = load i64, i64* %4, align 8, !dbg !33
   %_mscmp = icmp eq i64 %_msld, 0, !dbg !33
@@ -148,7 +148,7 @@ _Z1fv.exit:                                       ; preds = %16, %if.then.i
 declare void @__msan_init()
 
 ; Function Attrs: nounwind readnone
-declare void @llvm.dbg.value(metadata, i64, metadata, metadata) #2
+declare void @llvm.dbg.value(metadata, metadata, metadata) #2
 
 ; Function Attrs: nounwind
 declare i32 @puts(i8* nocapture readonly) #3
@@ -190,7 +190,7 @@ declare i8* @__msan_memcpy(i8*, i8*, i64)
 declare i8* @__msan_memset(i8*, i32, i64)
 
 ; Function Attrs: nounwind
-declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i32, i1) #3
+declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i1) #3
 
 attributes #0 = { sanitize_memory uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #1 = { nobuiltin "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }

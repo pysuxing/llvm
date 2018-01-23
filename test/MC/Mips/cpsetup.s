@@ -1,22 +1,24 @@
-# RUN: llvm-mc -triple mips64-unknown-linux -target-abi o32 -filetype=obj -o - %s | \
+# RUN: llvm-mc -triple mips-unknown-linux -target-abi o32 -filetype=obj -o - %s | \
 # RUN:   llvm-objdump -d -r - | FileCheck -check-prefixes=ALL,O32 %s
 
-# RUN: llvm-mc -triple mips64-unknown-unknown -target-abi o32 %s | \
-# RUN:   FileCheck -check-prefixes=ALL,ASM %s
+# RUN: llvm-mc -triple mips-unknown-linux -target-abi o32 %s | \
+# RUN:   FileCheck -check-prefixes=ALL,ASM,ASM-O32 %s
 
+# FIXME: Now we check .cpsetup expansion for `-mno-shared` case only.
+#        We also need to implement/check the `-mshared` case.
 # RUN: llvm-mc -triple mips64-unknown-linux -target-abi n32 -filetype=obj -o - %s | \
 # RUN:   llvm-objdump -d -r - | \
 # RUN:   FileCheck -check-prefixes=ALL,NXX,N32 %s
 
-# RUN: llvm-mc -triple mips64-unknown-unknown -target-abi n32 %s | \
-# RUN:   FileCheck -check-prefixes=ALL,ASM %s
+# RUN: llvm-mc -triple mips64-unknown-linux -target-abi n32 %s | \
+# RUN:   FileCheck -check-prefixes=ALL,ASM,ASM-N32 %s
 
 # RUN: llvm-mc -triple mips64-unknown-linux %s -filetype=obj -o - | \
 # RUN:   llvm-objdump -d -r - | \
 # RUN:   FileCheck -check-prefixes=ALL,NXX,N64 %s
 
-# RUN: llvm-mc -triple mips64-unknown-unknown %s | \
-# RUN:   FileCheck -check-prefixes=ALL,ASM %s
+# RUN: llvm-mc -triple mips64-unknown-linux %s | \
+# RUN:   FileCheck -check-prefixes=ALL,ASM,ASM-N64 %s
 
         .text
         .option pic2
@@ -32,10 +34,10 @@ t1:
 
 # NXX-NEXT: sd       $gp, 8($sp)
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
 # N64-NEXT: daddu    $gp, $gp, $25
 
@@ -60,10 +62,10 @@ t2:
 
 # NXX-NEXT: move     $2, $gp
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
 # N64-NEXT: daddu    $gp, $gp, $25
 
@@ -96,17 +98,19 @@ t3:
 
 # NXX-NEXT: move     $2, $gp
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: {{^ *0+}}38: R_MIPS_HI16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: {{^ *0+}}38: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: {{^ *0+}}40: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16 .text
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: {{^ *0+}}3c: R_MIPS_LO16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: {{^ *0+}}3c: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: {{^ *0+}}44: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16 .text
 # N64-NEXT: daddu    $gp, $gp, $25
 # NXX-NEXT: nop
 # NXX-NEXT: sub $3, $3, $2
 
-# ASM: $tmp0:
-# ASM-NEXT: .cpsetup $25, $2, $tmp0
+# ASM-O32: [[LABEL:\$tmp0]]:
+# ASM-N32: [[LABEL:\.Ltmp0]]:
+# ASM-N64: [[LABEL:\.Ltmp0]]:
+# ASM-NEXT: .cpsetup $25, $2, [[LABEL]]
 
 # Ensure we have at least one instruction between labels so that the labels
 # we're matching aren't removed.
@@ -149,10 +153,10 @@ t5:
 
 # NXX-NEXT: sd       $gp, 8($sp)
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
 # N64-NEXT: daddu    $gp, $gp, $25
 
@@ -174,10 +178,10 @@ IMM_8 = 8
 
 # NXX-NEXT: sd       $gp, 8($sp)
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
 # N64-NEXT: daddu    $gp, $gp, $25
 

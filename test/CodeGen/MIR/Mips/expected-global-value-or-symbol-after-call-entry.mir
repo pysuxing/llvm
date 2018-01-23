@@ -1,4 +1,4 @@
-# RUN: not llc -march=mipsel -mattr=mips16 -relocation-model=pic -start-after branch-folder -stop-after branch-folder -o /dev/null %s 2>&1 | FileCheck %s
+# RUN: not llc -march=mipsel -mattr=mips16 -relocation-model=pic -run-pass none -o /dev/null %s 2>&1 | FileCheck %s
 --- |
   define i32 @test(i32 %a) {
   entry:
@@ -27,7 +27,7 @@ body: |
     liveins: %a0, %ra
 
     Save16 %ra, 24, implicit-def %sp, implicit %sp
-    %v0, %v1 = GotPrologue16 $_gp_disp, $_gp_disp
+    %v0, %v1 = GotPrologue16 &_gp_disp, &_gp_disp
     %v0 = SllX16 killed %v0, 16
     %v0 = AdduRxRyRz16 killed %v1, killed %v0
   ; CHECK: [[@LINE+1]]:67: expected a global value or an external symbol after 'call-entry'

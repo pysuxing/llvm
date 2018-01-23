@@ -32,10 +32,11 @@ void initializeLanaiMemAluCombinerPass(PassRegistry &);
 
 extern "C" void LLVMInitializeLanaiTarget() {
   // Register the target.
-  RegisterTargetMachine<LanaiTargetMachine> registered_target(TheLanaiTarget);
+  RegisterTargetMachine<LanaiTargetMachine> registered_target(
+      getTheLanaiTarget());
 }
 
-static std::string computeDataLayout(const Triple &TT) {
+static std::string computeDataLayout() {
   // Data layout (keep in sync with clang/lib/Basic/Targets.cpp)
   return "E"        // Big endian
          "-m:e"     // ELF name manging
@@ -46,38 +47,43 @@ static std::string computeDataLayout(const Triple &TT) {
          "-S64";    // 64 bit natural stack alignment
 }
 
-static Reloc::Model getEffectiveRelocModel(const Triple &TT,
-                                           Optional<Reloc::Model> RM) {
+static Reloc::Model getEffectiveRelocModel(Optional<Reloc::Model> RM) {
   if (!RM.hasValue())
     return Reloc::PIC_;
   return *RM;
+}
+
+static CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM) {
+  if (CM)
+    return *CM;
+  return CodeModel::Medium;
 }
 
 LanaiTargetMachine::LanaiTargetMachine(const Target &T, const Triple &TT,
                                        StringRef Cpu, StringRef FeatureString,
                                        const TargetOptions &Options,
                                        Optional<Reloc::Model> RM,
-                                       CodeModel::Model CodeModel,
-                                       CodeGenOpt::Level OptLevel)
-    : LLVMTargetMachine(T, computeDataLayout(TargetTriple), TT, Cpu,
-                        FeatureString, Options, getEffectiveRelocModel(TT, RM),
-                        CodeModel, OptLevel),
-      Subtarget(TT, Cpu, FeatureString, *this, Options, CodeModel, OptLevel),
+                                       Optional<CodeModel::Model> CodeModel,
+                                       CodeGenOpt::Level OptLevel, bool JIT)
+    : LLVMTargetMachine(T, computeDataLayout(), TT, Cpu, FeatureString, Options,
+                        getEffectiveRelocModel(RM),
+                        getEffectiveCodeModel(CodeModel), OptLevel),
+      Subtarget(TT, Cpu, FeatureString, *this, Options, getCodeModel(),
+                OptLevel),
       TLOF(new LanaiTargetObjectFile()) {
   initAsmInfo();
 }
 
-TargetIRAnalysis LanaiTargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(LanaiTTIImpl(this, F));
-  });
+TargetTransformInfo
+LanaiTargetMachine::getTargetTransformInfo(const Function &F) {
+  return TargetTransformInfo(LanaiTTIImpl(this, F));
 }
 
 namespace {
 // Lanai Code Generator Pass Configuration Options.
 class LanaiPassConfig : public TargetPassConfig {
 public:
-  LanaiPassConfig(LanaiTargetMachine *TM, PassManagerBase *PassManager)
+  LanaiPassConfig(LanaiTargetMachine &TM, PassManagerBase *PassManager)
       : TargetPassConfig(TM, *PassManager) {}
 
   LanaiTargetMachine &getLanaiTargetMachine() const {
@@ -92,7 +98,7 @@ public:
 
 TargetPassConfig *
 LanaiTargetMachine::createPassConfig(PassManagerBase &PassManager) {
-  return new LanaiPassConfig(this, &PassManager);
+  return new LanaiPassConfig(*this, &PassManager);
 }
 
 // Install an instruction selector pass.

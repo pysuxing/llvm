@@ -23,7 +23,7 @@ declare void @llvm.amdgcn.s.barrier() #1
 ; CI-DAG: ds_read2_b32 v{{\[[0-9]+:[0-9]+\]}}, [[VADDR]] offset0:32 offset1:34
 ; CI-DAG: ds_read_b32 v{{[0-9]+}}, [[VADDR]] offset:256
 ; CHECK: s_endpgm
-define void @signed_ds_offset_addressing_loop(float addrspace(1)* noalias nocapture %out, float addrspace(3)* noalias nocapture readonly %lptr, i32 %n) #2 {
+define amdgpu_kernel void @signed_ds_offset_addressing_loop(float addrspace(1)* noalias nocapture %out, float addrspace(3)* noalias nocapture readonly %lptr, i32 %n) #2 {
 entry:
   %x.i = tail call i32 @llvm.amdgcn.workitem.id.x() #0
   %mul = shl nsw i32 %x.i, 1
@@ -67,4 +67,4 @@ for.end:                                          ; preds = %for.body
 
 attributes #0 = { nounwind readnone }
 attributes #1 = { convergent nounwind }
-attributes #2 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #2 = { nounwind }

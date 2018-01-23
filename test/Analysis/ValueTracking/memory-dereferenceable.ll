@@ -20,9 +20,12 @@ declare i32* @foo()
 @globalptr.align16 = external global i8, align 16
 
 ; CHECK-LABEL: 'test'
-define void @test(i32 addrspace(1)* dereferenceable(8) %dparam,
+define void @test(%struct.A* sret %result,
+                  i32 addrspace(1)* dereferenceable(8) %dparam,
                   i8 addrspace(1)* dereferenceable(32) align 1 %dparam.align1,
-                  i8 addrspace(1)* dereferenceable(32) align 16 %dparam.align16)
+                  i8 addrspace(1)* dereferenceable(32) align 16 %dparam.align16,
+                  i8* byval %i8_byval,
+                  %struct.A* byval %A_byval)
     gc "statepoint-example" {
 ; CHECK: The following are dereferenceable:
 entry:
@@ -34,6 +37,20 @@ entry:
     %alloca = alloca i1
     %load2 = load i1, i1* %alloca
 
+    ; Load from empty array alloca
+; CHECK-NOT: %empty_alloca
+    %empty_alloca = alloca i8, i64 0
+    %empty_load = load i8, i8* %empty_alloca
+
+    ; Loads from sret arguments
+; CHECK: %sret_gep{{.*}}(aligned)
+    %sret_gep = getelementptr inbounds %struct.A, %struct.A* %result, i64 0, i32 1, i64 2
+    load i8, i8* %sret_gep
+
+; CHECK-NOT: %sret_gep_outside
+    %sret_gep_outside = getelementptr %struct.A, %struct.A* %result, i64 0, i32 1, i64 7
+    load i8, i8* %sret_gep_outside
+
 ; CHECK: %dparam{{.*}}(aligned)
     %load3 = load i32, i32 addrspace(1)* %dparam
 
@@ -43,7 +60,8 @@ entry:
     %load4 = load i32, i32 addrspace(1)* %relocate
 
 ; CHECK-NOT: %nparam
-    %nparam = getelementptr i32, i32 addrspace(1)* %dparam, i32 5
+    %dpa = call i32 addrspace(1)* @func1(i32 addrspace(1)* %dparam)
+    %nparam = getelementptr i32, i32 addrspace(1)* %dpa, i32 5
     %load5 = load i32, i32 addrspace(1)* %nparam
 
     ; Load from a non-dereferenceable load
@@ -92,6 +110,18 @@ entry:
 ; CHECK: %dparam.align16{{.*}}(aligned)
     %load15 = load i8, i8 addrspace(1)* %dparam.align1, align 16
     %load16 = load i8, i8 addrspace(1)* %dparam.align16, align 16
+
+    ; Loads from byval arguments
+; CHECK: %i8_byval{{.*}}(aligned)
+    %i8_byval_load = load i8, i8* %i8_byval
+
+; CHECK-NOT: %byval_cast
+    %byval_cast = bitcast i8* %i8_byval to i32*
+    %bad_byval_load = load i32, i32* %byval_cast
+
+; CHECK: %byval_gep{{.*}}(aligned)
+    %byval_gep = getelementptr inbounds %struct.A, %struct.A* %A_byval, i64 0, i32 1, i64 2
+    load i8, i8* %byval_gep
 
     ; Loads from aligned allocas
 ; CHECK: %alloca.align1{{.*}}(unaligned)
@@ -161,6 +191,8 @@ if.end:
 
 declare token @llvm.experimental.gc.statepoint.p0f_i1f(i64, i32, i1 ()*, i32, i32, ...)
 declare i32 addrspace(1)* @llvm.experimental.gc.relocate.p1i32(token, i32, i32)
+
+declare i32 addrspace(1)* @func1(i32 addrspace(1)* returned) nounwind argmemonly
 
 !0 = !{i64 4}
 !1 = !{i64 2}

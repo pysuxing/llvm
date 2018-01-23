@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "gtest/gtest.h"
 using namespace llvm;
 
@@ -70,15 +71,19 @@ TEST(FunctionTest, stealArgumentListFrom) {
   EXPECT_TRUE(F1->hasLazyArguments());
   EXPECT_FALSE(F2->hasLazyArguments());
   unsigned I = 0;
-  for (Argument &A : F2->args())
-    EXPECT_EQ(Args[I++], &A);
+  for (Argument &A : F2->args()) {
+    EXPECT_EQ(Args[I], &A);
+    I++;
+  }
   EXPECT_EQ(2u, I);
 
   // Check that arguments in F1 don't have pointer equality with the saved ones.
   // This also instantiates F1's arguments.
   I = 0;
-  for (Argument &A : F1->args())
-    EXPECT_NE(Args[I++], &A);
+  for (Argument &A : F1->args()) {
+    EXPECT_NE(Args[I], &A);
+    I++;
+  }
   EXPECT_EQ(2u, I);
   EXPECT_FALSE(F1->hasLazyArguments());
   EXPECT_FALSE(F2->hasLazyArguments());
@@ -90,8 +95,10 @@ TEST(FunctionTest, stealArgumentListFrom) {
   EXPECT_FALSE(F1->hasLazyArguments());
   EXPECT_TRUE(F2->hasLazyArguments());
   I = 0;
-  for (Argument &A : F1->args())
-    EXPECT_EQ(Args[I++], &A);
+  for (Argument &A : F1->args()) {
+    EXPECT_EQ(Args[I], &A);
+    I++;
+  }
   EXPECT_EQ(2u, I);
 
   // Steal from F2 a second time.  Now both functions should have lazy
@@ -101,6 +108,26 @@ TEST(FunctionTest, stealArgumentListFrom) {
   F1->stealArgumentListFrom(*F2);
   EXPECT_TRUE(F1->hasLazyArguments());
   EXPECT_TRUE(F2->hasLazyArguments());
+}
+
+// Test setting and removing section information
+TEST(FunctionTest, setSection) {
+  LLVMContext C;
+  Module M("test", C);
+
+  llvm::Function *F =
+      Function::Create(llvm::FunctionType::get(llvm::Type::getVoidTy(C), false),
+                       llvm::GlobalValue::ExternalLinkage, "F", &M);
+
+  F->setSection(".text.test");
+  EXPECT_TRUE(F->getSection() == ".text.test");
+  EXPECT_TRUE(F->hasSection());
+  F->setSection("");
+  EXPECT_FALSE(F->hasSection());
+  F->setSection(".text.test");
+  F->setSection(".text.test2");
+  EXPECT_TRUE(F->getSection() == ".text.test2");
+  EXPECT_TRUE(F->hasSection());
 }
 
 } // end namespace

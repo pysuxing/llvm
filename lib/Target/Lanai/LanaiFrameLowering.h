@@ -15,7 +15,7 @@
 #define LLVM_LIB_TARGET_LANAI_LANAIFRAMELOWERING_H
 
 #include "Lanai.h"
-#include "llvm/Target/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
 
 namespace llvm {
 
@@ -46,7 +46,7 @@ public:
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I) const override;
 
-  bool hasFP(const MachineFunction &MF) const override { return true; }
+  bool hasFP(const MachineFunction & /*MF*/) const override { return true; }
 
   void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
                             RegScavenger *RS = nullptr) const override;

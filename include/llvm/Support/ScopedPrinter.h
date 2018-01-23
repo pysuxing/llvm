@@ -261,7 +261,11 @@ public:
   }
 
   void printString(StringRef Label, const std::string &Value) {
-    startLine() << Label << ": " << Value << "\n";
+    printString(Label, StringRef(Value));
+  }
+
+  void printString(StringRef Label, const char* Value) {
+    printString(Label, StringRef(Value));
   }
 
   template <typename T>
@@ -293,6 +297,11 @@ public:
     auto V = makeArrayRef(reinterpret_cast<const uint8_t *>(Value.data()),
                           Value.size());
     printBinaryImpl(Label, StringRef(), V, false);
+  }
+
+  void printBinaryBlock(StringRef Label, ArrayRef<uint8_t> Value,
+                        uint32_t StartOffset) {
+    printBinaryImpl(Label, StringRef(), Value, true, StartOffset);
   }
 
   void printBinaryBlock(StringRef Label, ArrayRef<uint8_t> Value) {
@@ -333,7 +342,7 @@ private:
   }
 
   void printBinaryImpl(StringRef Label, StringRef Str, ArrayRef<uint8_t> Value,
-                       bool Block);
+                       bool Block, uint32_t StartOffset = 0);
 
   raw_ostream &OS;
   int IndentLevel;

@@ -10,6 +10,8 @@
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "MCTargetDesc/X86FixupKinds.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/BinaryFormat/ELF.h"
+#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
@@ -18,13 +20,9 @@
 #include "llvm/MC/MCMachObjectWriter.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSectionCOFF.h"
-#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
-#include "llvm/Support/ELF.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MachO.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -69,19 +67,10 @@ public:
 };
 
 class X86AsmBackend : public MCAsmBackend {
-  const StringRef CPU;
-  bool HasNopl;
-  const uint64_t MaxNopLength;
+  const MCSubtargetInfo &STI;
 public:
-  X86AsmBackend(const Target &T, StringRef CPU)
-      : MCAsmBackend(), CPU(CPU),
-        MaxNopLength((CPU == "slm" || CPU == "lakemont") ? 7 : 15) {
-    HasNopl = CPU != "generic" && CPU != "i386" && CPU != "i486" &&
-              CPU != "i586" && CPU != "pentium" && CPU != "pentium-mmx" &&
-              CPU != "i686" && CPU != "k6" && CPU != "k6-2" && CPU != "k6-3" &&
-              CPU != "geode" && CPU != "winchip-c6" && CPU != "winchip2" &&
-              CPU != "c3" && CPU != "c3-2";
-  }
+  X86AsmBackend(const Target &T, const MCSubtargetInfo &STI)
+      : MCAsmBackend(), STI(STI) {}
 
   unsigned getNumFixupKinds() const override {
     return X86::NumTargetFixupKinds;
@@ -107,12 +96,12 @@ public:
     return Infos[Kind - FirstTargetFixupKind];
   }
 
-  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                  uint64_t Value, bool IsPCRel) const override {
+  void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                  const MCValue &Target, MutableArrayRef<char> Data,
+                  uint64_t Value, bool IsResolved) const override {
     unsigned Size = 1 << getFixupKindLog2Size(Fixup.getKind());
 
-    assert(Fixup.getOffset() + Size <= DataSize &&
-           "Invalid fixup offset!");
+    assert(Fixup.getOffset() + Size <= Data.size() && "Invalid fixup offset!");
 
     // Check that uppper bits are either all zeros or all ones.
     // Specifically ignore overflow/underflow as long as the leakage is
@@ -131,38 +120,57 @@ public:
                             const MCRelaxableFragment *DF,
                             const MCAsmLayout &Layout) const override;
 
-  void relaxInstruction(const MCInst &Inst, MCInst &Res) const override;
+  void relaxInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
+                        MCInst &Res) const override;
 
   bool writeNopData(uint64_t Count, MCObjectWriter *OW) const override;
 };
 } // end anonymous namespace
 
-static unsigned getRelaxedOpcodeBranch(unsigned Op) {
+static unsigned getRelaxedOpcodeBranch(const MCInst &Inst, bool is16BitMode) {
+  unsigned Op = Inst.getOpcode();
   switch (Op) {
   default:
     return Op;
-
-  case X86::JAE_1: return X86::JAE_4;
-  case X86::JA_1:  return X86::JA_4;
-  case X86::JBE_1: return X86::JBE_4;
-  case X86::JB_1:  return X86::JB_4;
-  case X86::JE_1:  return X86::JE_4;
-  case X86::JGE_1: return X86::JGE_4;
-  case X86::JG_1:  return X86::JG_4;
-  case X86::JLE_1: return X86::JLE_4;
-  case X86::JL_1:  return X86::JL_4;
-  case X86::JMP_1: return X86::JMP_4;
-  case X86::JNE_1: return X86::JNE_4;
-  case X86::JNO_1: return X86::JNO_4;
-  case X86::JNP_1: return X86::JNP_4;
-  case X86::JNS_1: return X86::JNS_4;
-  case X86::JO_1:  return X86::JO_4;
-  case X86::JP_1:  return X86::JP_4;
-  case X86::JS_1:  return X86::JS_4;
+  case X86::JAE_1:
+    return (is16BitMode) ? X86::JAE_2 : X86::JAE_4;
+  case X86::JA_1:
+    return (is16BitMode) ? X86::JA_2 : X86::JA_4;
+  case X86::JBE_1:
+    return (is16BitMode) ? X86::JBE_2 : X86::JBE_4;
+  case X86::JB_1:
+    return (is16BitMode) ? X86::JB_2 : X86::JB_4;
+  case X86::JE_1:
+    return (is16BitMode) ? X86::JE_2 : X86::JE_4;
+  case X86::JGE_1:
+    return (is16BitMode) ? X86::JGE_2 : X86::JGE_4;
+  case X86::JG_1:
+    return (is16BitMode) ? X86::JG_2 : X86::JG_4;
+  case X86::JLE_1:
+    return (is16BitMode) ? X86::JLE_2 : X86::JLE_4;
+  case X86::JL_1:
+    return (is16BitMode) ? X86::JL_2 : X86::JL_4;
+  case X86::JMP_1:
+    return (is16BitMode) ? X86::JMP_2 : X86::JMP_4;
+  case X86::JNE_1:
+    return (is16BitMode) ? X86::JNE_2 : X86::JNE_4;
+  case X86::JNO_1:
+    return (is16BitMode) ? X86::JNO_2 : X86::JNO_4;
+  case X86::JNP_1:
+    return (is16BitMode) ? X86::JNP_2 : X86::JNP_4;
+  case X86::JNS_1:
+    return (is16BitMode) ? X86::JNS_2 : X86::JNS_4;
+  case X86::JO_1:
+    return (is16BitMode) ? X86::JO_2 : X86::JO_4;
+  case X86::JP_1:
+    return (is16BitMode) ? X86::JP_2 : X86::JP_4;
+  case X86::JS_1:
+    return (is16BitMode) ? X86::JS_2 : X86::JS_4;
   }
 }
 
-static unsigned getRelaxedOpcodeArith(unsigned Op) {
+static unsigned getRelaxedOpcodeArith(const MCInst &Inst) {
+  unsigned Op = Inst.getOpcode();
   switch (Op) {
   default:
     return Op;
@@ -246,20 +254,20 @@ static unsigned getRelaxedOpcodeArith(unsigned Op) {
   }
 }
 
-static unsigned getRelaxedOpcode(unsigned Op) {
-  unsigned R = getRelaxedOpcodeArith(Op);
-  if (R != Op)
+static unsigned getRelaxedOpcode(const MCInst &Inst, bool is16BitMode) {
+  unsigned R = getRelaxedOpcodeArith(Inst);
+  if (R != Inst.getOpcode())
     return R;
-  return getRelaxedOpcodeBranch(Op);
+  return getRelaxedOpcodeBranch(Inst, is16BitMode);
 }
 
 bool X86AsmBackend::mayNeedRelaxation(const MCInst &Inst) const {
-  // Branches can always be relaxed.
-  if (getRelaxedOpcodeBranch(Inst.getOpcode()) != Inst.getOpcode())
+  // Branches can always be relaxed in either mode.
+  if (getRelaxedOpcodeBranch(Inst, false) != Inst.getOpcode())
     return true;
 
   // Check if this instruction is ever relaxable.
-  if (getRelaxedOpcodeArith(Inst.getOpcode()) == Inst.getOpcode())
+  if (getRelaxedOpcodeArith(Inst) == Inst.getOpcode())
     return false;
 
 
@@ -282,9 +290,12 @@ bool X86AsmBackend::fixupNeedsRelaxation(const MCFixup &Fixup,
 
 // FIXME: Can tblgen help at all here to verify there aren't other instructions
 // we can relax?
-void X86AsmBackend::relaxInstruction(const MCInst &Inst, MCInst &Res) const {
+void X86AsmBackend::relaxInstruction(const MCInst &Inst,
+                                     const MCSubtargetInfo &STI,
+                                     MCInst &Res) const {
   // The only relaxations X86 does is from a 1byte pcrel to a 4byte pcrel.
-  unsigned RelaxedOp = getRelaxedOpcode(Inst.getOpcode());
+  bool is16BitMode = STI.getFeatureBits()[X86::Mode16Bit];
+  unsigned RelaxedOp = getRelaxedOpcode(Inst, is16BitMode);
 
   if (RelaxedOp == Inst.getOpcode()) {
     SmallString<256> Tmp;
@@ -326,13 +337,14 @@ bool X86AsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
   };
 
   // This CPU doesn't support long nops. If needed add more.
-  // FIXME: Can we get this from the subtarget somehow?
   // FIXME: We could generated something better than plain 0x90.
-  if (!HasNopl) {
+  if (!STI.getFeatureBits()[X86::FeatureNOPL]) {
     for (uint64_t i = 0; i < Count; ++i)
       OW->write8(0x90);
     return true;
   }
+
+  uint64_t MaxNopLength = STI.getFeatureBits()[X86::ProcIntelSLM] ? 7 : 15;
 
   // 15 is the longest single nop instruction.  Emit as many 15-byte nops as
   // needed, then emit a nop of the remaining length.
@@ -357,26 +369,30 @@ namespace {
 class ELFX86AsmBackend : public X86AsmBackend {
 public:
   uint8_t OSABI;
-  ELFX86AsmBackend(const Target &T, uint8_t OSABI, StringRef CPU)
-      : X86AsmBackend(T, CPU), OSABI(OSABI) {}
+  ELFX86AsmBackend(const Target &T, uint8_t OSABI, const MCSubtargetInfo &STI)
+      : X86AsmBackend(T, STI), OSABI(OSABI) {}
 };
 
 class ELFX86_32AsmBackend : public ELFX86AsmBackend {
 public:
-  ELFX86_32AsmBackend(const Target &T, uint8_t OSABI, StringRef CPU)
-    : ELFX86AsmBackend(T, OSABI, CPU) {}
+  ELFX86_32AsmBackend(const Target &T, uint8_t OSABI,
+                      const MCSubtargetInfo &STI)
+    : ELFX86AsmBackend(T, OSABI, STI) {}
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createX86ELFObjectWriter(OS, /*IsELF64*/ false, OSABI, ELF::EM_386);
   }
 };
 
 class ELFX86_X32AsmBackend : public ELFX86AsmBackend {
 public:
-  ELFX86_X32AsmBackend(const Target &T, uint8_t OSABI, StringRef CPU)
-      : ELFX86AsmBackend(T, OSABI, CPU) {}
+  ELFX86_X32AsmBackend(const Target &T, uint8_t OSABI,
+                       const MCSubtargetInfo &STI)
+      : ELFX86AsmBackend(T, OSABI, STI) {}
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createX86ELFObjectWriter(OS, /*IsELF64*/ false, OSABI,
                                     ELF::EM_X86_64);
   }
@@ -384,10 +400,12 @@ public:
 
 class ELFX86_IAMCUAsmBackend : public ELFX86AsmBackend {
 public:
-  ELFX86_IAMCUAsmBackend(const Target &T, uint8_t OSABI, StringRef CPU)
-      : ELFX86AsmBackend(T, OSABI, CPU) {}
+  ELFX86_IAMCUAsmBackend(const Target &T, uint8_t OSABI,
+                         const MCSubtargetInfo &STI)
+      : ELFX86AsmBackend(T, OSABI, STI) {}
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createX86ELFObjectWriter(OS, /*IsELF64*/ false, OSABI,
                                     ELF::EM_IAMCU);
   }
@@ -395,10 +413,12 @@ public:
 
 class ELFX86_64AsmBackend : public ELFX86AsmBackend {
 public:
-  ELFX86_64AsmBackend(const Target &T, uint8_t OSABI, StringRef CPU)
-    : ELFX86AsmBackend(T, OSABI, CPU) {}
+  ELFX86_64AsmBackend(const Target &T, uint8_t OSABI,
+                      const MCSubtargetInfo &STI)
+    : ELFX86AsmBackend(T, OSABI, STI) {}
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createX86ELFObjectWriter(OS, /*IsELF64*/ true, OSABI, ELF::EM_X86_64);
   }
 };
@@ -407,8 +427,9 @@ class WindowsX86AsmBackend : public X86AsmBackend {
   bool Is64Bit;
 
 public:
-  WindowsX86AsmBackend(const Target &T, bool is64Bit, StringRef CPU)
-    : X86AsmBackend(T, CPU)
+  WindowsX86AsmBackend(const Target &T, bool is64Bit,
+                       const MCSubtargetInfo &STI)
+    : X86AsmBackend(T, STI)
     , Is64Bit(is64Bit) {
   }
 
@@ -420,7 +441,8 @@ public:
         .Default(MCAsmBackend::getFixupKind(Name));
   }
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createX86WinCOFFObjectWriter(OS, Is64Bit);
   }
 };
@@ -523,8 +545,12 @@ protected:
         //     .cfi_def_cfa_register %rbp
         //
         HasFP = true;
-        assert(MRI.getLLVMRegNum(Inst.getRegister(), true) ==
-               (Is64Bit ? X86::RBP : X86::EBP) && "Invalid frame pointer!");
+
+        // If the frame pointer is other than esp/rsp, we do not have a way to
+        // generate a compact unwinding representation, so bail out.
+        if (MRI.getLLVMRegNum(Inst.getRegister(), true) !=
+            (Is64Bit ? X86::RBP : X86::EBP))
+          return 0;
 
         // Reset the counts.
         memset(SavedRegs, 0, sizeof(SavedRegs));
@@ -761,9 +787,9 @@ private:
   }
 
 public:
-  DarwinX86AsmBackend(const Target &T, const MCRegisterInfo &MRI, StringRef CPU,
-                      bool Is64Bit)
-    : X86AsmBackend(T, CPU), MRI(MRI), Is64Bit(Is64Bit) {
+  DarwinX86AsmBackend(const Target &T, const MCRegisterInfo &MRI,
+                      const MCSubtargetInfo &STI, bool Is64Bit)
+    : X86AsmBackend(T, STI), MRI(MRI), Is64Bit(Is64Bit) {
     memset(SavedRegs, 0, sizeof(SavedRegs));
     OffsetSize = Is64Bit ? 8 : 4;
     MoveInstrSize = Is64Bit ? 3 : 2;
@@ -774,10 +800,11 @@ public:
 class DarwinX86_32AsmBackend : public DarwinX86AsmBackend {
 public:
   DarwinX86_32AsmBackend(const Target &T, const MCRegisterInfo &MRI,
-                         StringRef CPU)
-      : DarwinX86AsmBackend(T, MRI, CPU, false) {}
+                         const MCSubtargetInfo &STI)
+      : DarwinX86AsmBackend(T, MRI, STI, false) {}
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createX86MachObjectWriter(OS, /*Is64Bit=*/false,
                                      MachO::CPU_TYPE_I386,
                                      MachO::CPU_SUBTYPE_I386_ALL);
@@ -794,10 +821,11 @@ class DarwinX86_64AsmBackend : public DarwinX86AsmBackend {
   const MachO::CPUSubTypeX86 Subtype;
 public:
   DarwinX86_64AsmBackend(const Target &T, const MCRegisterInfo &MRI,
-                         StringRef CPU, MachO::CPUSubTypeX86 st)
-      : DarwinX86AsmBackend(T, MRI, CPU, true), Subtype(st) {}
+                         const MCSubtargetInfo &STI, MachO::CPUSubTypeX86 st)
+      : DarwinX86AsmBackend(T, MRI, STI, true), Subtype(st) {}
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createX86MachObjectWriter(OS, /*Is64Bit=*/true,
                                      MachO::CPU_TYPE_X86_64, Subtype);
   }
@@ -812,41 +840,43 @@ public:
 } // end anonymous namespace
 
 MCAsmBackend *llvm::createX86_32AsmBackend(const Target &T,
+                                           const MCSubtargetInfo &STI,
                                            const MCRegisterInfo &MRI,
-                                           const Triple &TheTriple,
-                                           StringRef CPU) {
+                                           const MCTargetOptions &Options) {
+  const Triple &TheTriple = STI.getTargetTriple();
   if (TheTriple.isOSBinFormatMachO())
-    return new DarwinX86_32AsmBackend(T, MRI, CPU);
+    return new DarwinX86_32AsmBackend(T, MRI, STI);
 
   if (TheTriple.isOSWindows() && TheTriple.isOSBinFormatCOFF())
-    return new WindowsX86AsmBackend(T, false, CPU);
+    return new WindowsX86AsmBackend(T, false, STI);
 
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
 
   if (TheTriple.isOSIAMCU())
-    return new ELFX86_IAMCUAsmBackend(T, OSABI, CPU);
+    return new ELFX86_IAMCUAsmBackend(T, OSABI, STI);
 
-  return new ELFX86_32AsmBackend(T, OSABI, CPU);
+  return new ELFX86_32AsmBackend(T, OSABI, STI);
 }
 
 MCAsmBackend *llvm::createX86_64AsmBackend(const Target &T,
+                                           const MCSubtargetInfo &STI,
                                            const MCRegisterInfo &MRI,
-                                           const Triple &TheTriple,
-                                           StringRef CPU) {
+                                           const MCTargetOptions &Options) {
+  const Triple &TheTriple = STI.getTargetTriple();
   if (TheTriple.isOSBinFormatMachO()) {
     MachO::CPUSubTypeX86 CS =
         StringSwitch<MachO::CPUSubTypeX86>(TheTriple.getArchName())
             .Case("x86_64h", MachO::CPU_SUBTYPE_X86_64_H)
             .Default(MachO::CPU_SUBTYPE_X86_64_ALL);
-    return new DarwinX86_64AsmBackend(T, MRI, CPU, CS);
+    return new DarwinX86_64AsmBackend(T, MRI, STI, CS);
   }
 
   if (TheTriple.isOSWindows() && TheTriple.isOSBinFormatCOFF())
-    return new WindowsX86AsmBackend(T, true, CPU);
+    return new WindowsX86AsmBackend(T, true, STI);
 
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
 
   if (TheTriple.getEnvironment() == Triple::GNUX32)
-    return new ELFX86_X32AsmBackend(T, OSABI, CPU);
-  return new ELFX86_64AsmBackend(T, OSABI, CPU);
+    return new ELFX86_X32AsmBackend(T, OSABI, STI);
+  return new ELFX86_64AsmBackend(T, OSABI, STI);
 }

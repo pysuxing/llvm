@@ -69,6 +69,39 @@ static inline void EraseInstruction(Instruction *CI) {
     RecursivelyDeleteTriviallyDeadInstructions(OldArg);
 }
 
+/// If Inst is a ReturnRV and its operand is a call or invoke, return the
+/// operand. Otherwise return null.
+static inline const Instruction *getreturnRVOperand(const Instruction &Inst,
+                                                    ARCInstKind Class) {
+  if (Class != ARCInstKind::RetainRV)
+    return nullptr;
+
+  const auto *Opnd = Inst.getOperand(0)->stripPointerCasts();
+  if (const auto *C = dyn_cast<CallInst>(Opnd))
+    return C;
+  return dyn_cast<InvokeInst>(Opnd);
+}
+
+/// Return the list of PHI nodes that are equivalent to PN.
+template<class PHINodeTy, class VectorTy>
+void getEquivalentPHIs(PHINodeTy &PN, VectorTy &PHIList) {
+  auto *BB = PN.getParent();
+  for (auto &P : BB->phis()) {
+    if (&P == &PN) // Do not add PN to the list.
+      continue;
+    unsigned I = 0, E = PN.getNumIncomingValues();
+    for (; I < E; ++I) {
+      auto *BB = PN.getIncomingBlock(I);
+      auto *PNOpnd = PN.getIncomingValue(I)->stripPointerCasts();
+      auto *POpnd = P.getIncomingValueForBlock(BB)->stripPointerCasts();
+      if (PNOpnd != POpnd)
+        break;
+    }
+    if (I == E)
+      PHIList.push_back(&P);
+  }
+}
+
 } // end namespace objcarc
 } // end namespace llvm
 
